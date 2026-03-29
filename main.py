@@ -25,7 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MONGO_DETAILS = os.getenv("MONGO_DETAILS", "mongodb+srv://thanhlinhbaby99_db_user:ywdEiWek790teTBP@cluster0.your_url.mongodb.net/?retryWrites=true&w=majority")
+MONGO_DETAILS = os.getenv("MONGO_DETAILS")
 client = AsyncIOMotorClient(MONGO_DETAILS)
 database = client.hanu_plagiarism
 user_collection = database.get_collection("users")
