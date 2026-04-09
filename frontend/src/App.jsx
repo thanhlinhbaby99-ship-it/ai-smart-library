@@ -1,21 +1,26 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import Login from './pages/Login';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import Login from './pages/Login'; // Đường dẫn tới file Login của cậu
 import Dashboard from './pages/Dashboard';
+import Workspace from './pages/Workspace';
 
 function App() {
   return (
-    <BrowserRouter>
+    <Router>
       <Routes>
-        {/* Đường dẫn mặc định sẽ vào phòng Đăng nhập */}
+        {/* 1. Mặc định vào trang Login */}
         <Route path="/" element={<Login />} />
         
-        {/* Đường dẫn /dashboard sẽ mở trang Dashboard */}
+        {/* 2. Trang Dashboard chính sau khi login */}
         <Route path="/dashboard" element={<Dashboard />} />
         
-        {/* Nếu người dùng gõ bậy bạ đường dẫn, tự động đuổi về trang chủ */}
+        {/* 3. Trang AI Workspace chuyên sâu */}
+        <Route path="/workspace" element={<Workspace />} />
+        
+        {/* 4. Nếu gõ bậy bạ đường dẫn thì quay về Login */}
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
-    </BrowserRouter>
+    </Router>
   );
 }
 
