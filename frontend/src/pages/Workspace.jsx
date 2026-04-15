@@ -19,7 +19,7 @@ const Workspace = () => {
 
   const [chatInput, setChatInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [messages, setMessages] = useState([]); // Để trống ban đầu để useEffect tự quyết định
+  const [messages, setMessages] = useState([]);
 
   const [pdfUrl, setPdfUrl] = useState("https://pdfobject.com/pdf/sample.pdf"); 
   const [currentFilename, setCurrentFilename] = useState("Tutorial09.pdf");
@@ -28,19 +28,43 @@ const Workspace = () => {
   const [checkResult, setCheckResult] = useState(null);
   const [checking, setChecking] = useState(false);
 
-  // 1. LẤY FILE TỪ DASHBOARD (CHỈ HIỆN 1 CÂU CHÀO DUY NHẤT)
+  // ==========================================
+  // 1. LẤY FILE TỪ URL & LOAD LỊCH SỬ CHAT
+  // ==========================================
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
     const fileFromUrl = queryParams.get('file');
 
-    if (fileFromUrl) {
-      const fileName = decodeURIComponent(fileFromUrl);
+    const fetchHistoryAndSetup = async (fileName) => {
       setCurrentFilename(fileName);
       setPdfUrl(`http://localhost:8000/uploads/${fileName}`);
-      setMessages([{
-        role: 'ai',
-        text: `Bi đã nhận được file **${fileName}** từ Dashboard. Cậu có thể bắt đầu hỏi được rồi nhé! 🚀`
-      }]);
+      setLoading(true);
+
+      try {
+        // Gọi API lấy lịch sử chat từ MongoDB
+        const res = await fetch(`http://localhost:8000/api/chat-history/${encodeURIComponent(fileName)}`);
+        if (res.ok) {
+          const history = await res.json();
+          if (history && history.length > 0) {
+            // Nếu có lịch sử, load thẳng vào khung chat
+            setMessages(history);
+          } else {
+            // Nếu là file mới tinh chưa chat bao giờ
+            setMessages([{
+              role: 'ai',
+              text: `Bi đã nhận được file **${fileName}** từ Dashboard. Cậu có thể bắt đầu hỏi được rồi nhé! 🚀`
+            }]);
+          }
+        }
+      } catch (error) {
+        console.error("Lỗi khi tải lịch sử chat:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (fileFromUrl) {
+      fetchHistoryAndSetup(decodeURIComponent(fileFromUrl));
     } else {
       setMessages([{
         role: 'ai',
@@ -49,7 +73,87 @@ const Workspace = () => {
     }
   }, [location.search]);
 
-  // 2. ĐỔI TÀI LIỆU TRỰC TIẾP TẠI WORKSPACE
+  // ==========================================
+  // 🌟 TIME TRACKER - BỘ ĐẾM GIỜ THÔNG MINH 🌟
+  // ==========================================
+  useEffect(() => {
+    if (!currentFilename || currentFilename === "Tutorial09.pdf") return;
+
+    let isTracking = true;
+    let startTime = Date.now();
+    let totalReadTime = 0;
+
+    // Hàm cộng dồn thời gian
+    const accumulateTime = () => {
+      if (isTracking) {
+        const timeSpent = Math.floor((Date.now() - startTime) / 1000);
+        totalReadTime += timeSpent;
+      }
+    };
+
+    // Bắt sự kiện người dùng chuyển tab
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        accumulateTime();
+        isTracking = false; // Dừng đếm
+      } else {
+        startTime = Date.now();
+        isTracking = true; // Đếm lại
+      }
+    };
+
+    // Hàm gửi API về server
+    const sendTimeToServer = async (timeInSeconds) => {
+      if (timeInSeconds < 5) return; // Đọc dưới 5s không tính
+      try {
+        await fetch("http://localhost:8000/api/update-time", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: encodeURIComponent(currentFilename),
+            reading_time_added: timeInSeconds,
+            plagiarism_check_added: 0
+          })
+        });
+        console.log(`⏱️ [Time Tracker] Đã lưu ${timeInSeconds}s cho file: ${currentFilename}`);
+      } catch (error) {
+        console.error("Lỗi khi lưu thời gian đọc:", error);
+      }
+    };
+
+    // Bắt sự kiện khi user tắt hẳn trình duyệt
+    const handleBeforeUnload = () => {
+      accumulateTime();
+      // Dùng keepalive để đảm bảo request vẫn bay đi dù trình duyệt đang đóng
+      fetch("http://localhost:8000/api/update-time", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: encodeURIComponent(currentFilename),
+            reading_time_added: totalReadTime,
+            plagiarism_check_added: 0
+          }),
+          keepalive: true 
+      });
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    // Cleanup: Chạy khi đổi file hoặc rời khỏi trang Workspace
+    return () => {
+      accumulateTime();
+      if (totalReadTime > 0) {
+          sendTimeToServer(totalReadTime);
+      }
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [currentFilename]); // Hook này sẽ chạy lại mỗi khi currentFilename thay đổi
+  // ==========================================
+
+
+  // 2. ĐỔI TÀI LIỆU
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -59,7 +163,9 @@ const Workspace = () => {
 
     const localUrl = URL.createObjectURL(file);
     setPdfUrl(localUrl);
-    setCurrentFilename(file.name);
+    
+    // Khi set file mới, useEffect của TimeTracker phía trên sẽ tự động chốt sổ file cũ và đếm lại file mới!
+    setCurrentFilename(file.name); 
 
     const formData = new FormData();
     formData.append('file', file);
@@ -113,13 +219,8 @@ const Workspace = () => {
     }
   };
 
-  // 4. KIỂM TRA ĐẠO VĂN
+  // 4. KIỂM TRA ĐẠO VĂN (SMART CHECK - GỬI TOÀN BỘ LỊCH SỬ CHAT)
   const handleSmartCheck = async () => {
-    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-    if (!lastUserMsg) {
-        alert("Cậu nhắn gì đó vào chat trước đã!");
-        return;
-    }
     setChecking(true);
     setShowCheckModal(true);
     try {
@@ -127,7 +228,7 @@ const Workspace = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          user_text: lastUserMsg.text, 
+          chat_history: JSON.stringify(messages),
           filename: encodeURIComponent(currentFilename) 
         }),
       });
@@ -184,7 +285,7 @@ const Workspace = () => {
                     <div className="w-8 h-8 rounded-lg bg-[#6B46C1] flex items-center justify-center text-white font-bold text-xs shadow-md">AI</div>
                     <div>
                       <h3 className="font-bold text-sm text-gray-800">Gemini Assistant</h3>
-                      <p className="text-[10px] text-green-500 font-medium">{loading ? "Đang xử lý tài liệu lớn..." : "Trực tuyến"}</p>
+                      <p className="text-[10px] text-green-500 font-medium">{loading ? "Đang xử lý..." : "Trực tuyến"}</p>
                     </div>
                 </div>
                 <button onClick={handleSmartCheck} className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 text-[#6B46C1] rounded-lg text-[11px] font-bold border border-purple-100 hover:bg-purple-100 transition shadow-sm">
@@ -204,9 +305,9 @@ const Workspace = () => {
                   </div>
                 </div>
               ))}
-              {loading && <div className="text-gray-400 text-xs italic animate-pulse">Bi đang đọc tài liệu, chờ xíu nhé...</div>}
+              {loading && <div className="text-gray-400 text-xs italic animate-pulse">Bi đang xử lý, chờ xíu nhé...</div>}
             </div>
-
+                
             <div className="p-4 bg-white border-t border-gray-100 absolute bottom-0 w-full z-10 shadow-sm">
               <form onSubmit={handleSendMessage} className="relative flex items-center bg-[#F8FAFC] border border-gray-200 rounded-xl overflow-hidden shadow-inner">
                 <input 
@@ -226,41 +327,84 @@ const Workspace = () => {
       {showCheckModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-md flex items-center justify-center z-[200] p-4">
           <div className="bg-white rounded-[32px] w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-300">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-purple-50 to-white">
-              <h3 className="text-xl font-bold text-purple-900 flex items-center gap-2">🛡️ AI Research Guard</h3>
+            {/* Header Modal */}
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-indigo-50 to-white">
+              <h3 className="text-xl font-bold text-indigo-900 flex items-center gap-2">
+                <FiShield className="text-indigo-600" /> AI Research Guard Analysis
+              </h3>
               <button onClick={() => setShowCheckModal(false)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 transition">✕</button>
             </div>
+
             <div className="p-8">
               {checking ? (
                 <div className="py-12 flex flex-col items-center justify-center space-y-4">
-                    <div className="w-12 h-12 border-4 border-purple-200 border-t-[#6B46C1] rounded-full animate-spin"></div>
-                    <p className="text-gray-500 font-medium text-center">Đang nạp file lên Gemini để soi đạo văn...<br/><span className="text-sm">Quá trình này có thể mất 10-20 giây.</span></p>
+                    <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                    <p className="text-gray-500 font-medium">Bi đang đối soát dữ liệu với tài liệu...</p>
                 </div>
               ) : checkResult && (
                 <div className="space-y-6">
                   <div className="grid grid-cols-2 gap-6">
-                      <div className="p-5 bg-orange-50 rounded-3xl border border-orange-100">
-                          <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-1">Độ tương đồng</p>
-                          <p className="text-5xl font-black text-orange-600">{checkResult.similarity}</p>
-                          <p className="text-xs text-orange-800 mt-3 font-medium leading-relaxed italic">"{checkResult.feedback}"</p>
+                      {/* Cột 1: Similarity Score */}
+                      <div className={`p-6 rounded-3xl border ${
+                        parseInt(checkResult.similarity) > 50 ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'
+                      }`}>
+                          <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${
+                            parseInt(checkResult.similarity) > 50 ? 'text-red-600' : 'text-green-600'
+                          }`}>Similarity Score</p>
+                          <p className={`text-5xl font-black ${
+                            parseInt(checkResult.similarity) > 50 ? 'text-red-600' : 'text-green-600'
+                          }`}>{checkResult.similarity}</p>
+                          <p className="text-xs text-gray-600 mt-3 font-medium leading-relaxed italic">
+                            "{checkResult.feedback}"
+                          </p>
                       </div>
-                      <div className="p-5 bg-blue-50 rounded-3xl border border-blue-100 flex flex-col">
-                          <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-2">Đề xuất viết lại</p>
-                          <div className="space-y-3 flex-1 overflow-y-auto max-h-[120px] pr-2 custom-scrollbar">
+
+                      {/* Cột 2: Smart Rewrites */}
+                      <div className="p-6 bg-blue-50 rounded-3xl border border-blue-100 flex flex-col">
+                          <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-3">AI Suggestions (Nâng cấp & Trích dẫn)</p>
+                          <div className="space-y-3 flex-1 overflow-y-auto max-h-[150px] pr-2 custom-scrollbar">
                              {checkResult.rewrites && checkResult.rewrites.map((r, i) => (
-                               <p key={i} className="text-[11px] text-blue-900 bg-white/60 p-2 rounded-lg border border-blue-100/50">"{r}"</p>
+                               <div key={i} className="group relative">
+                                  <p className="text-[11px] text-blue-900 bg-white/80 p-3 rounded-xl border border-blue-200/50 hover:border-blue-400 transition cursor-pointer">
+                                    "{r}"
+                                  </p>
+                               </div>
                              ))}
                           </div>
                       </div>
                   </div>
-                  <div className="bg-[#1E1B4B] p-6 rounded-[24px] text-white shadow-xl relative overflow-hidden group">
+
+                  {/* Next Steps Box */}
+                  <div className="bg-[#1E1B4B] p-6 rounded-[24px] text-white shadow-xl relative overflow-hidden">
                       <FiCpu className="absolute -right-4 -top-4 text-white/10 w-24 h-24 rotate-12" />
-                      <p className="text-xs font-bold text-purple-300 mb-3 flex items-center gap-2">Gợi ý từ AI:</p>
-                      <p className="text-sm text-gray-200 leading-relaxed italic">"{checkResult.next_steps}"</p>
+                      <p className="text-xs font-bold text-indigo-300 mb-2 flex items-center gap-2">
+                        <span className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse"></span>
+                        Gợi ý nghiên cứu:
+                      </p>
+                      <p className="text-sm text-gray-200 leading-relaxed">
+                        {checkResult.next_steps}
+                      </p>
                   </div>
+
+                  {/* Action Buttons */}
                   <div className="flex gap-3 pt-2">
-                    <button onClick={() => setShowCheckModal(false)} className="flex-1 py-4 bg-gray-100 text-gray-700 font-bold rounded-2xl hover:bg-gray-200 transition">Đóng</button>
-                    <button className="flex-[2] py-4 bg-[#6B46C1] text-white font-bold rounded-2xl shadow-lg hover:bg-[#5a3aa3] transition shadow-purple-100">Áp dụng viết lại</button>
+                    <button 
+                      onClick={() => setShowCheckModal(false)}
+                      className="flex-1 py-4 bg-gray-100 text-gray-700 font-bold rounded-2xl hover:bg-gray-200 transition"
+                    >
+                      Đóng
+                    </button>
+                    <button 
+                      onClick={() => {
+                        if (checkResult.rewrites && checkResult.rewrites.length > 0) {
+                          setChatInput(checkResult.rewrites[0]);
+                          setShowCheckModal(false);
+                        }
+                      }}
+                      className="flex-[2] py-4 bg-indigo-600 text-white font-bold rounded-2xl shadow-lg hover:bg-indigo-700 transition"
+                    >
+                      Đưa gợi ý vào khung Chat
+                    </button>
                   </div>
                 </div>
               )}

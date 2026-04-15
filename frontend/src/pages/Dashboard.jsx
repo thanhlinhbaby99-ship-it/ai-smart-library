@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Sidebar from '../components/Sidebar'; 
 import { 
@@ -13,7 +13,71 @@ const Dashboard = () => {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadStatus, setUploadStatus] = useState('');
-  const [aiResult, setAiResult] = useState(null);
+  
+  // State lưu dữ liệu thực từ MongoDB
+  const [documents, setDocuments] = useState([]);
+  const [docChartData, setDocChartData] = useState([]);
+  
+  // State mới cho biểu đồ Thời gian đọc (Reading Time)
+  const [timeChartData, setTimeChartData] = useState([]);
+  const [totalReadTimeFormatted, setTotalReadTimeFormatted] = useState("0h 0m");
+
+  // Hàm gọi API lấy danh sách file
+  const fetchDocuments = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/documents');
+      if (response.ok) {
+        const data = await response.json();
+        setDocuments(data);
+        processChartData(data);
+        processReadTimeData(data); // Gọi thêm hàm xử lý dữ liệu thời gian
+      }
+    } catch (error) {
+      console.error("Lỗi khi tải dữ liệu tài liệu:", error);
+    }
+  };
+
+  // Hàm tính toán biểu đồ theo ngày trong tuần từ dữ liệu thực
+  const processChartData = (docs) => {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const dataTemplate = [
+      { name: 'Mon', count: 0 }, { name: 'Tue', count: 0 }, { name: 'Wed', count: 0 },
+      { name: 'Thu', count: 0 }, { name: 'Fri', count: 0 }, { name: 'Sat', count: 0 }, { name: 'Sun', count: 0 }
+    ];
+
+    docs.forEach(doc => {
+      if (doc.created_at) {
+        const date = new Date(doc.created_at);
+        const dayName = days[date.getDay()];
+        const dayObj = dataTemplate.find(d => d.name === dayName);
+        if (dayObj) dayObj.count += 1;
+      }
+    });
+    setDocChartData(dataTemplate);
+  };
+
+  // Hàm tính tổng thời gian đọc và chuẩn bị dữ liệu cho biểu đồ LineChart
+  const processReadTimeData = (docs) => {
+    // 1. Tính tổng thời gian đọc của tất cả tài liệu
+    const totalSeconds = docs.reduce((acc, doc) => acc + (doc.read_time_seconds || 0), 0);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    setTotalReadTimeFormatted(`${hours}h ${minutes}m`);
+
+    // 2. Lấy tối đa 7 tài liệu mới nhất, đổi số giây thành phút để vẽ biểu đồ
+    const recentDocsForChart = [...docs].slice(0, 7).reverse().map(doc => ({
+      name: doc.filename.length > 8 ? doc.filename.substring(0, 8) + '...' : doc.filename,
+      minutes: parseFloat(((doc.read_time_seconds || 0) / 60).toFixed(1)) 
+    }));
+    
+    // Nếu chưa có dữ liệu thì set mảng mặc định để chart không bị lỗi crash
+    setTimeChartData(recentDocsForChart.length > 0 ? recentDocsForChart : [{ name: 'Chưa có', minutes: 0 }]);
+  };
+
+  // Chạy lần đầu khi mở trang
+  useEffect(() => {
+    fetchDocuments();
+  }, []);
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -54,10 +118,9 @@ const Dashboard = () => {
       
       if (response.ok && data.ai_keywords) {
         setUploadStatus('AI phân tích thành công!');
-        setAiResult({
-          filename: data.filename,
-          keywords: data.ai_keywords.split(',')
-        });
+        
+        // Gọi lại hàm lấy tài liệu để danh sách tự cập nhật
+        fetchDocuments();
 
         setTimeout(() => {
             setIsUploadModalOpen(false);
@@ -72,22 +135,11 @@ const Dashboard = () => {
     }
   };
 
-  const docData = [
-    { name: 'Mon', count: 4 }, { name: 'Tue', count: 7 }, { name: 'Wed', count: 3 },
-    { name: 'Thu', count: 8 }, { name: 'Fri', count: 5 }, { name: 'Sat', count: 2 }, { name: 'Sun', count: 6 }
-  ];
-  const timeData = [
-    { name: 'Mon', hours: 1.5 }, { name: 'Tue', hours: 3.2 }, { name: 'Wed', hours: 2.1 },
-    { name: 'Thu', hours: 4.8 }, { name: 'Fri', hours: 3.0 }, { name: 'Sat', hours: 4.5 }, { name: 'Sun', hours: 2.0 }
-  ];
-
   return (
     <div className="flex h-screen bg-[#F8FAFC] font-sans text-gray-800">
       
-      {/* 1. SIDEBAR */}
       <Sidebar />
 
-      {/* 2. MAIN CONTENT */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* HEADER */}
         <header className="h-20 bg-white border-b border-gray-100 flex items-center justify-between px-8">
@@ -122,18 +174,18 @@ const Dashboard = () => {
           </div>
 
           <div className="grid grid-cols-3 gap-6 mb-8">
-            {/* CARD 1 */}
+            {/* CARD 1: TOTAL DOCUMENTS (Live Data) */}
             <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between h-56 relative group">
               <div className="flex justify-between items-start">
                 <div>
                   <p className="text-gray-500 text-sm font-medium mb-1">Total Documents</p>
-                  <h3 className="text-3xl font-bold text-gray-800">24</h3>
+                  <h3 className="text-3xl font-bold text-gray-800">{documents.length}</h3>
                 </div>
                 <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><FiFileText size={20} /></div>
               </div>
               <div className="h-24 w-full mt-4 -ml-2">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={docData}>
+                  <BarChart data={docChartData}>
                     <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#9CA3AF'}} dy={10} />
                     <Tooltip cursor={{fill: '#F3F0FF'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
                     <Bar dataKey="count" fill="#3B82F6" radius={[4, 4, 4, 4]} barSize={12} />
@@ -142,27 +194,27 @@ const Dashboard = () => {
               </div>
             </div>
 
-            {/* CARD 2 */}
+            {/* CARD 2: READING TIME (Live Data) */}
             <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between h-56">
               <div className="flex justify-between items-start">
                 <div>
                   <p className="text-gray-500 text-sm font-medium mb-1">Reading Time</p>
-                  <h3 className="text-3xl font-bold text-gray-800">12h 45m</h3>
+                  <h3 className="text-3xl font-bold text-gray-800">{totalReadTimeFormatted}</h3>
                 </div>
                 <div className="p-2 bg-purple-50 text-purple-600 rounded-lg"><FiClock size={20} /></div>
               </div>
               <div className="h-24 w-full mt-4 -ml-2">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={timeData}>
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#9CA3AF'}} dy={10} />
-                    <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
-                    <Line type="monotone" dataKey="hours" stroke="#6B46C1" strokeWidth={3} dot={{ r: 4, fill: '#6B46C1', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} />
+                  <LineChart data={timeChartData}>
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#9CA3AF'}} dy={10} />
+                    <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} formatter={(value) => [`${value} phút`, 'Thời gian đọc']} />
+                    <Line type="monotone" dataKey="minutes" stroke="#6B46C1" strokeWidth={3} dot={{ r: 4, fill: '#6B46C1', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             </div>
               
-            {/* CARD 3 */}
+            {/* CARD 3: PROGRESS */}
             <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between h-56">
               <div className="flex justify-between items-start">
                 <div>
@@ -191,49 +243,53 @@ const Dashboard = () => {
             </div>
           </div>
 
+          {/* RECENT DOCUMENTS (Live Data) */}
           <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-bold text-gray-800">Recent Documents</h3>
               <button className="text-sm font-medium text-[#6B46C1] hover:underline">View All</button>
             </div>
             
-            {!aiResult ? (
+            {documents.length === 0 ? (
               <div className="text-center text-gray-400 py-10 border-2 border-dashed border-gray-100 rounded-xl">
                 <FiFileText size={48} className="mx-auto mb-3 text-gray-300" />
                 <p>No documents yet. Click "Upload Document" to start checking!</p>
               </div>
             ) : (
-              <div className="flex items-center justify-between p-5 bg-white border border-gray-200 rounded-2xl shadow-sm hover:shadow-md transition group">
-                <div className="flex items-center gap-5">
-                  <div className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center">
-                    <FiFileText size={28} />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-gray-800 text-lg mb-1">{aiResult.filename}</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {aiResult.keywords.map((kw, idx) => (
-                        <span key={idx} className="px-3 py-1 bg-[#F3F0FF] text-[#6B46C1] text-xs font-bold rounded-full border border-purple-100">
-                          {kw.trim()}
-                        </span>
-                      ))}
+              <div className="space-y-4">
+                {documents.slice(0, 4).map((doc) => (
+                  <div key={doc._id} className="flex items-center justify-between p-5 bg-white border border-gray-200 rounded-2xl shadow-sm hover:shadow-md transition group">
+                    <div className="flex items-center gap-5">
+                      <div className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center">
+                        <FiFileText size={28} />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-gray-800 text-lg mb-1 truncate w-96">{doc.filename}</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {doc.keywords && doc.keywords.split(',').map((kw, idx) => (
+                            <span key={idx} className="px-3 py-1 bg-[#F3F0FF] text-[#6B46C1] text-xs font-bold rounded-full border border-purple-100">
+                              {kw.trim()}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     </div>
+                    
+                    <Link 
+                      to={`/workspace?file=${encodeURIComponent(doc.filename)}`} 
+                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition"
+                    >
+                      Mở trong Workspace <FiArrowRight />
+                    </Link>
                   </div>
-                </div>
-                
-                {/* ĐÃ SỬA LỖI Ở DÒNG NÀY: Dùng aiResult thay cho doc */}
-                <Link 
-                  to={`/workspace?file=${encodeURIComponent(aiResult.filename)}`} 
-                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition"
-                >
-                  Mở trong Workspace <FiArrowRight />
-                </Link>
+                ))}
               </div>
             )}
           </div>
         </main>
       </div>
 
-      {/* 3. UPLOAD MODAL */}
+      {/* UPLOAD MODAL */}
       {isUploadModalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white p-8 rounded-2xl w-[500px] shadow-2xl relative">
