@@ -74,9 +74,9 @@ function Login() {
         <div className="w-full md:w-1/2 p-12 flex flex-col justify-center">
           <div className="mb-10">
             <h2 className="text-3xl font-black text-gray-900 mb-2">
-              {isLoginMode ? 'Mừng cậu quay lại!' : 'Tạo tài khoản mới'}
+              {isLoginMode ? 'Mừng cậu chủ quay lại!' : 'Tạo tài khoản mới'}
             </h2>
-            <p className="text-gray-500 text-sm">Cùng Bi bắt đầu buổi nghiên cứu hôm nay nhé.</p>
+            <p className="text-gray-500 text-sm">OniChan baka</p>
           </div>
 
           {errorMsg && <div className="p-4 mb-6 text-sm text-red-600 bg-red-50 border border-red-100 rounded-2xl font-medium animate-shake">{errorMsg}</div>}

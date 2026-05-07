@@ -1,0 +1,9 @@
+fastapi
+pydantic[email]
+python-dotenv
+motor
+PyJWT
+certifi
+passlib[bcrypt]
+uvicorn
+google-genai
